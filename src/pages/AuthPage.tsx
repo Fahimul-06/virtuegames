@@ -26,7 +26,7 @@ export default function AuthPage() {
       if (mode === 'signin') {
         const { error } = await signIn(email, password);
         if (error) { setError(error); return; }
-        navigate('games');
+        navigate(email.trim().toLowerCase() === 'admin@gmail.com' ? 'admin' : 'games');
       } else {
         if (!username.trim()) { setError('Username is required.'); return; }
         if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }

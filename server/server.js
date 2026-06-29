@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
 import cloudRoutes from './routes/cloud.js';
 import { attachSignaling } from './services/signaling.js';
+import { ensureAdminUser } from './ensureAdmin.js';
 import http from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,6 +39,7 @@ const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/vertuegamezone';
 
 await mongoose.connect(MONGO_URI);
+await ensureAdminUser();
 const httpServer = http.createServer(app);
 attachSignaling(httpServer);
 httpServer.listen(PORT, () => console.log(`Vertue Game Zone running on port ${PORT}`));
