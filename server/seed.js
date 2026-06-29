@@ -7,7 +7,7 @@ await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/vertu
 await Promise.all(Object.values(models).map((m) => m.deleteMany({})));
 
 const admin = await models.profiles.create({
-  username: 'admin', email: 'admin@vertuegamezone.com', password: await bcrypt.hash('admin12345', 10), wallet_balance: 500, is_admin: true
+  username: 'admin', email: 'admin@gmail.com', password: await bcrypt.hash('Qwertyuiop09', 10), wallet_balance: 500, is_admin: true
 });
 const user = await models.profiles.create({
   username: 'demo', email: 'demo@vertuegamezone.com', password: await bcrypt.hash('demo12345', 10), wallet_balance: 100, is_admin: false
@@ -51,6 +51,6 @@ for (const gpu of gpus) {
 
 await models.wallet_transactions.create({ user_id: user._id.toString(), type: 'credit', amount: 100, description: 'Demo wallet credit', reference_type: 'seed', balance_after: 100 });
 console.log('Seed complete');
-console.log('Admin: admin@vertuegamezone.com / admin12345');
+console.log('Admin: admin@gmail.com / Qwertyuiop09');
 console.log('Demo: demo@vertuegamezone.com / demo12345');
 await mongoose.disconnect();
