@@ -1,4 +1,3 @@
-
 import express from 'express';
 import crypto from 'crypto';
 import { requireAuth } from '../middleware/auth.js';
@@ -6,6 +5,64 @@ import { models, toClient } from '../models/index.js';
 
 const router = express.Router();
 const TRIAL_SECONDS = Number(process.env.TRIAL_SECONDS || 300);
+const AGENT_SHARED_SECRET = process.env.AGENT_SHARED_SECRET || 'change-this-agent-secret';
+
+function requireAdmin(req, res, next) {
+  requireAuth(req, res, () => {
+    if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin only.' });
+    next();
+  });
+}
+
+function requireAgent(req, res, next) {
+  const token = req.header('x-agent-token') || req.body?.agent_token;
+  if (!token || token !== AGENT_SHARED_SECRET) return res.status(401).json({ error: 'Invalid GPU agent token.' });
+  next();
+}
+
+function slugify(text = '') {
+  return String(text).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+async function syncInstalledGames(installedGames = []) {
+  const normalized = [];
+  const ids = [];
+  for (const item of installedGames) {
+    const title = item.title || item.name;
+    if (!title) continue;
+    const slug = item.slug || slugify(title);
+    let game = await models.games.findOne({ $or: [{ slug }, { title }] });
+    if (!game) {
+      game = await models.games.create({
+        title,
+        slug,
+        description: item.description || `${title} is available on a connected GPU server.`,
+        genre: item.genre || 'Cloud Game',
+        developer: item.developer || 'Unknown',
+        publisher: item.publisher || 'Unknown',
+        thumbnail_url: item.cover_url || item.thumbnail_url || '',
+        banner_url: item.banner_url || item.cover_url || item.thumbnail_url || '',
+        trailer_url: item.trailer_url || '',
+        rating: item.rating || 4.5,
+        is_featured: false,
+        is_active: true,
+        tags: item.tags || ['cloud', 'server-installed']
+      });
+    }
+    ids.push(game._id.toString());
+    normalized.push({
+      game_id: game._id.toString(),
+      title: game.title,
+      slug,
+      platform: item.platform || 'windows',
+      launch_path: item.launch_path || item.exe || '',
+      install_dir: item.install_dir || '',
+      cover_url: item.cover_url || item.thumbnail_url || game.thumbnail_url || '',
+      executable_found: item.executable_found !== false
+    });
+  }
+  return { ids, normalized };
+}
 
 async function findAvailableNode(gameId = null) {
   const q = { status: 'online', $expr: { $lt: ['$used_slots', '$total_slots'] } };
@@ -22,6 +79,62 @@ async function getActiveSubscription(userId, gameId) {
   });
 }
 
+router.get('/nodes', requireAdmin, async (_req, res) => {
+  const nodes = await models.gpu_nodes.find().sort({ status: 1, last_heartbeat_at: -1 });
+  res.json(nodes.map(toClient));
+});
+
+router.get('/nodes/public', async (_req, res) => {
+  const nodes = await models.gpu_nodes.find({ status: 'online' }).select('name region gpu_model total_slots used_slots installed_game_ids installed_games status last_heartbeat_at hardware');
+  res.json(nodes.map(toClient));
+});
+
+router.post('/nodes/heartbeat', requireAgent, async (req, res) => {
+  const {
+    name,
+    region = 'local',
+    public_url = '',
+    gpu_model = 'RTX GPU',
+    total_slots = 1,
+    used_slots,
+    installed_games = [],
+    installed_game_ids = [],
+    hardware = {},
+    system = {},
+    capabilities = ['webrtc', 'game-streaming', 'gpu-rental']
+  } = req.body;
+
+  if (!name) return res.status(400).json({ error: 'Node name is required.' });
+  const synced = await syncInstalledGames(installed_games);
+  const gameIds = [...new Set([...(installed_game_ids || []), ...synced.ids])];
+  const node = await models.gpu_nodes.findOneAndUpdate(
+    { name },
+    {
+      name,
+      region,
+      public_url,
+      gpu_model: hardware.gpu_model || gpu_model,
+      total_slots,
+      ...(Number.isFinite(Number(used_slots)) ? { used_slots: Number(used_slots) } : {}),
+      installed_game_ids: gameIds,
+      installed_games: synced.normalized,
+      hardware,
+      system,
+      capabilities,
+      status: 'online',
+      last_heartbeat_at: new Date()
+    },
+    { upsert: true, new: true }
+  );
+  res.json(toClient(node));
+});
+
+router.patch('/nodes/:id', requireAdmin, async (req, res) => {
+  const node = await models.gpu_nodes.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  if (!node) return res.status(404).json({ error: 'GPU node not found.' });
+  res.json(toClient(node));
+});
+
 router.post('/game-sessions/start', requireAuth, async (req, res) => {
   try {
     const { game_id, is_trial = false } = req.body;
@@ -34,11 +147,12 @@ router.post('/game-sessions/start', requireAuth, async (req, res) => {
     if (!is_trial && !subscription) return res.status(402).json({ error: 'Purchase access before launching this game.' });
 
     const node = await findAvailableNode(game_id);
-    if (!node) return res.status(503).json({ error: 'No GPU server is free for this game right now.' });
+    if (!node) return res.status(503).json({ error: 'No GPU server is free for this game right now, or this game is not installed on any online server.' });
 
     const room = crypto.randomBytes(16).toString('hex');
     const now = new Date();
     const expiresAt = is_trial ? new Date(now.getTime() + TRIAL_SECONDS * 1000) : subscription.expires_at;
+    const installedGame = (node.installed_games || []).find((g) => String(g.game_id) === String(game_id));
     const session = await models.game_sessions.create({
       user_id: req.user.id,
       game_id,
@@ -54,12 +168,13 @@ router.post('/game-sessions/start', requireAuth, async (req, res) => {
         mode: 'webrtc',
         signaling_ws: `/ws/signaling?room=${room}`,
         gpu_node: node.name,
-        region: node.region
+        region: node.region,
+        launch_path: installedGame?.launch_path || '',
+        node_public_url: node.public_url || ''
       }
     });
     await models.gpu_nodes.findByIdAndUpdate(node._id, { $inc: { used_slots: 1 } });
 
-    // Real production: enqueue a command for the GPU agent to start Windows game process/capture.
     setTimeout(async () => {
       await models.game_sessions.findByIdAndUpdate(session._id, { status: 'active' }).catch(() => {});
     }, 1000);
@@ -97,7 +212,7 @@ router.post('/gpu-rentals/start', requireAuth, async (req, res) => {
     user_id: req.user.id, gpu_type_id, gpu_node_id: node._id.toString(), plan_type, workload_type,
     amount_paid: plan.price, starts_at: now, expires_at: new Date(now.getTime() + hours * 3600_000),
     is_active: true, status: 'provisioning',
-    connection_info: { mode: 'cloud-pc-webrtc', region: node.region, node: node.name }
+    connection_info: { mode: 'cloud-pc-webrtc', region: node.region, node: node.name, node_public_url: node.public_url || '' }
   });
   user.wallet_balance -= plan.price; await user.save();
   await models.wallet_transactions.create({ user_id: req.user.id, type: 'debit', amount: plan.price, description: `${gpu.name} ${plan_type} rental`, reference_type: 'gpu_rental', reference_id: rental._id.toString(), balance_after: user.wallet_balance });
@@ -110,17 +225,6 @@ router.post('/payments/create-intent', requireAuth, async (req, res) => {
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Amount must be positive.' });
   const intent = await models.payment_intents.create({ user_id: req.user.id, amount, provider, reference_type, reference_id, status: 'pending', checkout_url: provider === 'manual' ? null : `${process.env.PUBLIC_URL || ''}/checkout/mock` });
   res.status(201).json(toClient(intent));
-});
-
-// Admin/GPU-agent heartbeat. In production this must use a separate agent token.
-router.post('/nodes/heartbeat', async (req, res) => {
-  const { name, region='local', public_url='', gpu_model='RTX GPU', total_slots=1, installed_game_ids=[] } = req.body;
-  const node = await models.gpu_nodes.findOneAndUpdate(
-    { name },
-    { name, region, public_url, gpu_model, total_slots, installed_game_ids, status: 'online', last_heartbeat_at: new Date() },
-    { upsert: true, new: true }
-  );
-  res.json(toClient(node));
 });
 
 export default router;

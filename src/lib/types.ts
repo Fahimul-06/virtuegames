@@ -10,6 +10,7 @@ export interface Database {
       gpu_types: { Row: GpuType; Insert: Partial<GpuType>; Update: Partial<GpuType> };
       gpu_plans: { Row: GpuPlan; Insert: Partial<GpuPlan>; Update: Partial<GpuPlan> };
       gpu_rentals: { Row: GpuRental; Insert: Partial<GpuRental>; Update: Partial<GpuRental> };
+      gpu_nodes: { Row: GpuNode; Insert: Partial<GpuNode>; Update: Partial<GpuNode> };
       wallet_transactions: { Row: WalletTransaction; Insert: Partial<WalletTransaction>; Update: Partial<WalletTransaction> };
       support_tickets: { Row: SupportTicket; Insert: Partial<SupportTicket>; Update: Partial<SupportTicket> };
       ticket_replies: { Row: TicketReply; Insert: Partial<TicketReply>; Update: Partial<TicketReply> };
@@ -131,6 +132,37 @@ export interface GpuRental {
   connection_info: Record<string, unknown>;
   created_at: string;
   gpu_type?: GpuType;
+}
+
+
+export interface InstalledGame {
+  game_id: string;
+  title: string;
+  slug?: string;
+  platform?: string;
+  launch_path?: string;
+  install_dir?: string;
+  cover_url?: string;
+  executable_found?: boolean;
+}
+
+export interface GpuNode {
+  id: string;
+  name: string;
+  region: string;
+  public_url?: string;
+  gpu_model: string;
+  total_slots: number;
+  used_slots: number;
+  status: 'online' | 'offline' | 'maintenance';
+  last_heartbeat_at?: string;
+  installed_game_ids: string[];
+  installed_games: InstalledGame[];
+  hardware?: Record<string, unknown>;
+  system?: Record<string, unknown>;
+  capabilities?: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface WalletTransaction {

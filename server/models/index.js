@@ -71,8 +71,19 @@ const GpuRentalSchema = new mongoose.Schema({
 const WalletTransactionSchema = new mongoose.Schema({ user_id: String, type: String, amount: Number, description: String, reference_type: String, reference_id: String, balance_after: Number }, opts);
 const SupportTicketSchema = new mongoose.Schema({ user_id: String, subject: String, category: String, priority: String, status: String }, opts);
 const TicketReplySchema = new mongoose.Schema({ ticket_id: String, user_id: String, message: String, is_staff: Boolean }, opts);
+const InstalledGameSchema = new mongoose.Schema({
+  game_id: String,
+  title: String,
+  slug: String,
+  platform: String,
+  launch_path: String,
+  install_dir: String,
+  cover_url: String,
+  executable_found: Boolean
+}, { _id: false });
+
 const GpuNodeSchema = new mongoose.Schema({
-  name: String,
+  name: { type: String, unique: true, required: true },
   region: String,
   public_url: String,
   agent_token_hash: String,
@@ -82,6 +93,9 @@ const GpuNodeSchema = new mongoose.Schema({
   status: { type: String, default: 'offline' }, // online | offline | maintenance
   last_heartbeat_at: Date,
   installed_game_ids: [String],
+  installed_games: [InstalledGameSchema],
+  hardware: Object,
+  system: Object,
   capabilities: [String]
 }, opts);
 const PaymentIntentSchema = new mongoose.Schema({

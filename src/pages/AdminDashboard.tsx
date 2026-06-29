@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Users, Gamepad2, Server, DollarSign, TrendingUp, Shield, Activity, BarChart2, RefreshCw, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { apiRequest } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useApp } from '../contexts/AppContext';
-import type { Profile, Game, SupportTicket, GpuRental, UserGameSubscription } from '../lib/types';
+import type { Profile, Game, SupportTicket, GpuRental, UserGameSubscription, GpuNode } from '../lib/types';
 
 export default function AdminDashboard() {
   const { profile } = useAuth();
@@ -17,21 +18,24 @@ export default function AdminDashboard() {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [rentals, setRentals] = useState<GpuRental[]>([]);
   const [subscriptions, setSubscriptions] = useState<UserGameSubscription[]>([]);
+  const [nodes, setNodes] = useState<GpuNode[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
 
   const loadData = async () => {
-    const [usersRes, gamesRes, ticketsRes, rentalsRes, subsRes] = await Promise.all([
+    const [usersRes, gamesRes, ticketsRes, rentalsRes, subsRes, nodesRes] = await Promise.all([
       supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('games').select('*').order('created_at', { ascending: false }),
       supabase.from('support_tickets').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('gpu_rentals').select('*, gpu_type:gpu_types(name, model)').order('created_at', { ascending: false }).limit(50),
       supabase.from('user_game_subscriptions').select('*, game:games(title)').order('created_at', { ascending: false }).limit(50),
+      apiRequest('/cloud/nodes').then((data) => ({ data })).catch(() => ({ data: [] })),
     ]);
     setUsers(usersRes.data ?? []);
     setGames(gamesRes.data ?? []);
     setTickets(ticketsRes.data ?? []);
     setRentals((rentalsRes.data as GpuRental[]) ?? []);
     setSubscriptions((subsRes.data as UserGameSubscription[]) ?? []);
+    setNodes((nodesRes.data as GpuNode[]) ?? []);
 
     const rentalRevenue = (rentalsRes.data ?? []).reduce((s: number, r: GpuRental) => s + (r.amount_paid ?? 0), 0);
     const subRevenue = (subsRes.data ?? []).reduce((s: number, r: UserGameSubscription) => s + (r.amount_paid ?? 0), 0);
@@ -77,13 +81,13 @@ export default function AdminDashboard() {
     { id: 'users' as const, label: `Users (${users.length})`, icon: <Users size={14} /> },
     { id: 'games' as const, label: `Games (${games.length})`, icon: <Gamepad2 size={14} /> },
     { id: 'tickets' as const, label: `Tickets (${tickets.filter(t => t.status === 'open').length} open)`, icon: <Activity size={14} /> },
-    { id: 'servers' as const, label: `GPUs (${rentals.filter(r => r.is_active).length} active)`, icon: <Server size={14} /> },
+    { id: 'servers' as const, label: `GPU Nodes (${nodes.filter(n => n.status === 'online').length} online)`, icon: <Server size={14} /> },
   ];
 
   const statsCards = [
     { label: 'Total Users', value: users.length, icon: <Users size={18} className="text-cyan-400" />, color: 'text-cyan-400' },
     { label: 'Total Revenue', value: `$${totalRevenue.toFixed(2)}`, icon: <DollarSign size={18} className="text-emerald-400" />, color: 'text-emerald-400' },
-    { label: 'Active Rentals', value: rentals.filter(r => r.is_active).length, icon: <Server size={18} className="text-orange-400" />, color: 'text-orange-400' },
+    { label: 'Online GPU Nodes', value: nodes.filter(n => n.status === 'online').length, icon: <Server size={18} className="text-orange-400" />, color: 'text-orange-400' },
     { label: 'Open Tickets', value: tickets.filter(t => t.status === 'open').length, icon: <Activity size={18} className="text-red-400" />, color: 'text-red-400' },
     { label: 'Active Subs', value: subscriptions.filter(s => s.is_active).length, icon: <TrendingUp size={18} className="text-blue-400" />, color: 'text-blue-400' },
     { label: 'Active Games', value: games.filter(g => g.is_active).length, icon: <Gamepad2 size={18} className="text-violet-400" />, color: 'text-violet-400' },
@@ -300,12 +304,13 @@ export default function AdminDashboard() {
 
             {/* SERVERS */}
             {tab === 'servers' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   {[
-                    { label: 'Total Rentals', value: rentals.length, color: 'text-white' },
-                    { label: 'Active Instances', value: rentals.filter(r => r.is_active).length, color: 'text-emerald-400' },
-                    { label: 'Revenue', value: `$${rentals.reduce((s, r) => s + r.amount_paid, 0).toFixed(2)}`, color: 'text-cyan-400' },
+                    { label: 'Connected GPU Nodes', value: nodes.length, color: 'text-white' },
+                    { label: 'Online Nodes', value: nodes.filter(n => n.status === 'online').length, color: 'text-emerald-400' },
+                    { label: 'Total Slots', value: nodes.reduce((s, n) => s + (n.total_slots || 0), 0), color: 'text-cyan-400' },
+                    { label: 'Installed Games', value: new Set(nodes.flatMap(n => n.installed_game_ids || [])).size, color: 'text-violet-400' },
                   ].map((s) => (
                     <div key={s.label} className="p-4 rounded-2xl bg-gray-900 border border-white/5">
                       <div className="text-gray-500 text-xs mb-1">{s.label}</div>
@@ -313,31 +318,95 @@ export default function AdminDashboard() {
                     </div>
                   ))}
                 </div>
-                {rentals.map((rental) => (
-                  <div key={rental.id} className="p-4 rounded-2xl bg-gray-900 border border-white/5">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <div className="text-white text-sm font-medium">{rental.gpu_type?.name} ({rental.gpu_type?.model})</div>
-                        <div className="text-gray-500 text-xs">{rental.workload_type} · {rental.plan_type}</div>
+
+                <div className="bg-gray-900 border border-white/5 rounded-2xl p-5">
+                  <h3 className="text-white font-semibold mb-2">How to connect your GPU server</h3>
+                  <p className="text-gray-400 text-sm mb-3">
+                    Run the included <span className="text-cyan-400 font-mono">gpu-node-agent</span> on every Windows/Linux GPU server. It sends GPU info and installed games to this admin panel.
+                  </p>
+                  <div className="rounded-xl bg-gray-950 border border-white/10 p-3 text-xs text-gray-300 font-mono overflow-x-auto">
+                    AGENT_SHARED_SECRET=your-secret npm run agent -- --api=https://your-domain.com/api/cloud --name=BD-GPU-01
+                  </div>
+                </div>
+
+                {nodes.length === 0 ? (
+                  <div className="p-8 rounded-2xl bg-gray-900 border border-white/5 text-center">
+                    <Server size={42} className="mx-auto mb-3 text-gray-700" />
+                    <p className="text-gray-400">No GPU node has connected yet.</p>
+                    <p className="text-gray-600 text-sm mt-1">Start the GPU node agent on your server to show GPUs and installed games here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {nodes.map((node) => (
+                      <div key={node.id} className="p-5 rounded-2xl bg-gray-900 border border-white/5">
+                        <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-white font-semibold">{node.name}</h3>
+                              <span className={`px-2 py-0.5 rounded-full text-xs ${node.status === 'online' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-700 text-gray-400'}`}>
+                                {node.status}
+                              </span>
+                            </div>
+                            <div className="text-gray-500 text-xs mt-1">{node.region} · {node.gpu_model}</div>
+                            <div className="text-gray-600 text-xs mt-1">
+                              Last heartbeat: {node.last_heartbeat_at ? new Date(node.last_heartbeat_at).toLocaleString() : 'never'}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-cyan-400 font-bold">{node.used_slots}/{node.total_slots} slots used</div>
+                            <div className="text-gray-500 text-xs">{node.public_url || 'No public URL set'}</div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                          <div className="rounded-xl bg-gray-950 border border-white/5 p-3">
+                            <div className="text-gray-500 text-xs">CPU</div>
+                            <div className="text-gray-300 text-sm truncate">{String(node.hardware?.cpu || 'Not reported')}</div>
+                          </div>
+                          <div className="rounded-xl bg-gray-950 border border-white/5 p-3">
+                            <div className="text-gray-500 text-xs">RAM</div>
+                            <div className="text-gray-300 text-sm">{String(node.hardware?.ram_gb || '—')} GB</div>
+                          </div>
+                          <div className="rounded-xl bg-gray-950 border border-white/5 p-3">
+                            <div className="text-gray-500 text-xs">VRAM</div>
+                            <div className="text-gray-300 text-sm">{String(node.hardware?.vram_gb || '—')} GB</div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-gray-400 text-sm font-medium mb-2">Installed Games ({node.installed_games?.length || 0})</div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                            {(node.installed_games || []).map((game) => (
+                              <div key={`${node.id}-${game.game_id}-${game.title}`} className="rounded-xl bg-gray-950 border border-white/5 p-3">
+                                <div className="text-white text-sm font-medium truncate">{game.title}</div>
+                                <div className="text-gray-600 text-xs truncate">{game.launch_path || game.install_dir || 'Launch path not reported'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium ${
-                          rental.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' :
-                          rental.status === 'provisioning' ? 'bg-yellow-500/10 text-yellow-400' :
-                          'bg-gray-700 text-gray-400'
-                        }`}>
-                          {rental.status === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
-                          {rental.status}
-                        </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <h3 className="text-white font-semibold">Recent GPU Rentals</h3>
+                  {rentals.slice(0, 10).map((rental) => (
+                    <div key={rental.id} className="p-4 rounded-2xl bg-gray-900 border border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <div className="text-white text-sm font-medium">{rental.gpu_type?.name} ({rental.gpu_type?.model})</div>
+                          <div className="text-gray-500 text-xs">{rental.workload_type} · {rental.plan_type}</div>
+                        </div>
                         <span className="text-emerald-400 text-sm font-semibold">${rental.amount_paid.toFixed(2)}</span>
                       </div>
+                      <div className="text-gray-600 text-xs font-mono">
+                        {(rental.connection_info as Record<string, string>)?.node ?? 'N/A'}
+                        {rental.expires_at && ` · exp. ${new Date(rental.expires_at).toLocaleString()}`}
+                      </div>
                     </div>
-                    <div className="text-gray-600 text-xs font-mono">
-                      {(rental.connection_info as Record<string, string>)?.hostname ?? 'N/A'}
-                      {rental.expires_at && ` · exp. ${new Date(rental.expires_at).toLocaleString()}`}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </>
