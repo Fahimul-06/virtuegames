@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ArrowLeft, Star, Users, Play, Clock, Check, AlertCircle, Tag, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { apiRequest } from '../lib/api';
 import type { Game, GameScreenshot, GamePlan, UserGameSubscription, GameSession } from '../lib/types';
 import { useApp } from '../contexts/AppContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -76,19 +77,17 @@ export default function GameDetail({ gameId }: GameDetailProps) {
 
   const startSession = async (isTrial: boolean) => {
     if (!user) { navigate('auth'); return; }
-    const { data, error } = await supabase
-      .from('game_sessions')
-      .insert({
-        game_id: gameId,
-        is_trial: isTrial,
-        status: 'active',
-        subscription_id: subscription?.id ?? null,
-      })
-      .select()
-      .single();
-    if (!error && data) {
+    try {
+      const data = await apiRequest('/cloud/game-sessions/start', {
+        method: 'POST',
+        body: JSON.stringify({ game_id: gameId, is_trial: isTrial }),
+      });
       setActiveSession(data);
       if (isTrial) setTrialSession(data);
+      navigate('stream', gameId, data);
+    } catch (err: any) {
+      setPurchaseError(err.message || 'Could not launch game session.');
+      if (!isTrial) setPurchaseModal(true);
     }
   };
 
@@ -97,10 +96,15 @@ export default function GameDetail({ gameId }: GameDetailProps) {
     setSessionEndLoading(true);
     const started = new Date(activeSession.started_at).getTime();
     const duration = Math.floor((Date.now() - started) / 1000);
-    await supabase
-      .from('game_sessions')
-      .update({ status: 'ended', ended_at: new Date().toISOString(), duration_seconds: duration })
-      .eq('id', activeSession.id);
+    await apiRequest(`/cloud/game-sessions/${activeSession.id}/end`, {
+      method: 'POST',
+      body: JSON.stringify({ status: 'ended', duration_seconds: duration }),
+    }).catch(async () => {
+      await supabase
+        .from('game_sessions')
+        .update({ status: 'ended', ended_at: new Date().toISOString(), duration_seconds: duration })
+        .eq('id', activeSession.id);
+    });
     setActiveSession(null);
     setSessionEndLoading(false);
   };

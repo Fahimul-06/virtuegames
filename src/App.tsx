@@ -12,9 +12,10 @@ import Dashboard from './pages/Dashboard';
 import WalletPage from './pages/WalletPage';
 import SupportPage from './pages/SupportPage';
 import AdminDashboard from './pages/AdminDashboard';
+import StreamPage from './pages/StreamPage';
 
 function AppContent() {
-  const { currentPage, selectedGameId } = useApp();
+  const { currentPage, selectedGameId, selectedSession } = useApp();
   const { loading } = useAuth();
 
   if (loading) {
@@ -34,6 +35,7 @@ function AppContent() {
       case 'auth': return <AuthPage />;
       case 'games': return <GamesLibrary />;
       case 'game-detail': return selectedGameId ? <GameDetail gameId={selectedGameId} /> : <GamesLibrary />;
+      case 'stream': return selectedSession ? <StreamPage session={selectedSession} /> : <GamesLibrary />;
       case 'gpu-rentals': return <GPURentals />;
       case 'dashboard': return <Dashboard />;
       case 'wallet': return <WalletPage />;

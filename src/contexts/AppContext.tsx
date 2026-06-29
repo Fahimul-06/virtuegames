@@ -4,7 +4,8 @@ import type { Page } from '../lib/types';
 interface AppContextValue {
   currentPage: Page;
   selectedGameId: string | null;
-  navigate: (page: Page, gameId?: string) => void;
+  selectedSession: any | null;
+  navigate: (page: Page, gameId?: string, session?: any) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -12,15 +13,17 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentPage, setCurrentPage] = useState<Page>('landing');
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<any | null>(null);
 
-  const navigate = (page: Page, gameId?: string) => {
+  const navigate = (page: Page, gameId?: string, session?: any) => {
     setCurrentPage(page);
     if (gameId !== undefined) setSelectedGameId(gameId);
+    if (session !== undefined) setSelectedSession(session);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
-    <AppContext.Provider value={{ currentPage, selectedGameId, navigate }}>
+    <AppContext.Provider value={{ currentPage, selectedGameId, selectedSession, navigate }}>
       {children}
     </AppContext.Provider>
   );

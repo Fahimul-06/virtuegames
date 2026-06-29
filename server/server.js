@@ -6,6 +6,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
+import cloudRoutes from './routes/cloud.js';
+import { attachSignaling } from './services/signaling.js';
+import http from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +23,7 @@ app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'Vertue Game Zone MERN Web Service' }));
 app.use('/api/auth', authRoutes);
+app.use('/api/cloud', cloudRoutes);
 app.use('/api', apiRoutes);
 
 // Render single Web Service mode: serve React build from root /dist
@@ -34,4 +38,6 @@ const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/vertuegamezone';
 
 await mongoose.connect(MONGO_URI);
-app.listen(PORT, () => console.log(`Vertue Game Zone running on port ${PORT}`));
+const httpServer = http.createServer(app);
+attachSignaling(httpServer);
+httpServer.listen(PORT, () => console.log(`Vertue Game Zone running on port ${PORT}`));

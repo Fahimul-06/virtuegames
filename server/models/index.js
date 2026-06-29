@@ -32,7 +32,22 @@ const GameSchema = new mongoose.Schema({
 const GameScreenshotSchema = new mongoose.Schema({ game_id: String, url: String, caption: String, sort_order: Number }, opts);
 const GamePlanSchema = new mongoose.Schema({ game_id: String, plan_type: String, price: Number, hours_included: Number }, opts);
 const UserGameSubscriptionSchema = new mongoose.Schema({ user_id: String, game_id: String, plan_type: String, amount_paid: Number, starts_at: Date, expires_at: Date, is_active: Boolean }, opts);
-const GameSessionSchema = new mongoose.Schema({ user_id: String, game_id: String, subscription_id: String, started_at: Date, ended_at: Date, duration_seconds: Number, is_trial: Boolean, status: String }, opts);
+const GameSessionSchema = new mongoose.Schema({
+  user_id: String,
+  game_id: String,
+  subscription_id: String,
+  gpu_node_id: String,
+  started_at: Date,
+  ended_at: Date,
+  expires_at: Date,
+  duration_seconds: Number,
+  is_trial: Boolean,
+  status: { type: String, default: 'queued' }, // queued | provisioning | active | expired | ended | failed
+  stream_url: String,
+  signaling_room: String,
+  connection_info: Object,
+  billing: Object
+}, opts);
 
 const GpuTypeSchema = new mongoose.Schema({
   name: String, model: String, description: String, vram_gb: Number, cuda_cores: Number,
@@ -40,10 +55,47 @@ const GpuTypeSchema = new mongoose.Schema({
   thumbnail_url: String, is_available: { type: Boolean, default: true }, stock_count: Number
 }, opts);
 const GpuPlanSchema = new mongoose.Schema({ gpu_type_id: String, plan_type: String, price: Number }, opts);
-const GpuRentalSchema = new mongoose.Schema({ user_id: String, gpu_type_id: String, plan_type: String, workload_type: String, amount_paid: Number, starts_at: Date, expires_at: Date, is_active: Boolean, status: String, connection_info: Object }, opts);
+const GpuRentalSchema = new mongoose.Schema({
+  user_id: String,
+  gpu_type_id: String,
+  gpu_node_id: String,
+  plan_type: String,
+  workload_type: String,
+  amount_paid: Number,
+  starts_at: Date,
+  expires_at: Date,
+  is_active: Boolean,
+  status: String,
+  connection_info: Object
+}, opts);
 const WalletTransactionSchema = new mongoose.Schema({ user_id: String, type: String, amount: Number, description: String, reference_type: String, reference_id: String, balance_after: Number }, opts);
 const SupportTicketSchema = new mongoose.Schema({ user_id: String, subject: String, category: String, priority: String, status: String }, opts);
 const TicketReplySchema = new mongoose.Schema({ ticket_id: String, user_id: String, message: String, is_staff: Boolean }, opts);
+const GpuNodeSchema = new mongoose.Schema({
+  name: String,
+  region: String,
+  public_url: String,
+  agent_token_hash: String,
+  gpu_model: String,
+  total_slots: { type: Number, default: 1 },
+  used_slots: { type: Number, default: 0 },
+  status: { type: String, default: 'offline' }, // online | offline | maintenance
+  last_heartbeat_at: Date,
+  installed_game_ids: [String],
+  capabilities: [String]
+}, opts);
+const PaymentIntentSchema = new mongoose.Schema({
+  user_id: String,
+  provider: String,
+  type: String,
+  reference_type: String,
+  reference_id: String,
+  amount: Number,
+  currency: { type: String, default: 'USD' },
+  status: { type: String, default: 'pending' },
+  checkout_url: String,
+  metadata: Object
+}, opts);
 
 export const models = {
   profiles: mongoose.model('Profile', ProfileSchema),
@@ -57,7 +109,9 @@ export const models = {
   gpu_rentals: mongoose.model('GpuRental', GpuRentalSchema),
   wallet_transactions: mongoose.model('WalletTransaction', WalletTransactionSchema),
   support_tickets: mongoose.model('SupportTicket', SupportTicketSchema),
-  ticket_replies: mongoose.model('TicketReply', TicketReplySchema)
+  ticket_replies: mongoose.model('TicketReply', TicketReplySchema),
+  gpu_nodes: mongoose.model('GpuNode', GpuNodeSchema),
+  payment_intents: mongoose.model('PaymentIntent', PaymentIntentSchema)
 };
 
 export function toClient(doc) {

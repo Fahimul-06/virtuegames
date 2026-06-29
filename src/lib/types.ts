@@ -171,6 +171,7 @@ export type Page =
   | 'auth'
   | 'games'
   | 'game-detail'
+  | 'stream'
   | 'gpu-rentals'
   | 'dashboard'
   | 'wallet'
