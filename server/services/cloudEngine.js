@@ -1,14 +1,38 @@
 import { spawn } from 'child_process';
 import crypto from 'crypto';
 
+const engineMode = process.env.CLOUD_ENGINE_MODE || process.env.CLOUD_RUNTIME_MODE || 'local'; // local | remote
+const remoteEngineUrl = (process.env.CLOUD_ENGINE_URL || '').replace(/\/$/, '');
+const engineToken = process.env.CLOUD_ENGINE_TOKEN || process.env.ENGINE_TOKEN || '';
+
 const runtime = process.env.CLOUD_RUNTIME || 'docker';
 const publicHost = process.env.CLOUD_PUBLIC_HOST || 'localhost';
+const publicBaseUrl = (process.env.CLOUD_PUBLIC_BASE_URL || '').replace(/\/$/, '');
 const portStart = Number(process.env.CLOUD_PORT_START || 18080);
 const portEnd = Number(process.env.CLOUD_PORT_END || 18120);
 const defaultImage = process.env.CLOUD_DEFAULT_IMAGE || 'lscr.io/linuxserver/webtop:ubuntu-xfce';
 const internalPort = Number(process.env.CLOUD_INTERNAL_PORT || 3000);
 
 const memory = new Map();
+
+function remoteHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (engineToken) headers['x-engine-token'] = engineToken;
+  return headers;
+}
+
+async function remote(path, options = {}) {
+  if (!remoteEngineUrl) throw new Error('CLOUD_ENGINE_URL is required when CLOUD_ENGINE_MODE=remote');
+  const res = await fetch(`${remoteEngineUrl}${path}`, {
+    ...options,
+    headers: { ...remoteHeaders(), ...(options.headers || {}) }
+  });
+  const text = await res.text();
+  let body;
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+  if (!res.ok) throw new Error(body?.error || body?.message || `Remote engine failed: ${res.status}`);
+  return body;
+}
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -32,7 +56,7 @@ function imageForGame(game) {
   return process.env[envKey] || game?.cloud_image || defaultImage;
 }
 
-export async function startCloudSession({ userId, game, sessionId, isTrial }) {
+async function startLocalCloudSession({ userId, game, sessionId, isTrial }) {
   const port = await allocatePort();
   const name = `vgz-${sessionId}-${crypto.randomBytes(3).toString('hex')}`.toLowerCase();
   const image = imageForGame(game);
@@ -53,10 +77,12 @@ export async function startCloudSession({ userId, game, sessionId, isTrial }) {
 
   const session = {
     provider: 'docker-webtop',
+    engine_mode: 'local',
     container_name: name,
     image,
     port,
-    stream_url: `http://${publicHost}:${port}`,
+    stream_url: publicBaseUrl ? `${publicBaseUrl}/stream/${sessionId}/` : `http://${publicHost}:${port}`,
+    direct_stream_url: `http://${publicHost}:${port}`,
     internal_port: internalPort,
     trial_seconds: trialSeconds,
     started_at: new Date().toISOString(),
@@ -67,15 +93,29 @@ export async function startCloudSession({ userId, game, sessionId, isTrial }) {
   return session;
 }
 
+export async function startCloudSession(payload) {
+  if (engineMode === 'remote') {
+    return remote('/engine/sessions', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  return startLocalCloudSession(payload);
+}
+
 export async function stopCloudSession(sessionId, connectionInfo = {}) {
+  if (engineMode === 'remote') {
+    return remote(`/engine/sessions/${sessionId}/stop`, { method: 'POST', body: JSON.stringify({ connectionInfo }) });
+  }
   const info = memory.get(sessionId) || connectionInfo;
   if (info?.container_name) {
     await run('docker', ['rm', '-f', info.container_name]).catch(() => null);
   }
   memory.delete(sessionId);
+  return { stopped: true };
 }
 
 export async function getCloudStatus(sessionId, connectionInfo = {}) {
+  if (engineMode === 'remote') {
+    return remote(`/engine/sessions/${sessionId}/status`, { method: 'POST', body: JSON.stringify({ connectionInfo }) });
+  }
   const info = memory.get(sessionId) || connectionInfo;
   if (!info?.container_name) return { running: false };
   const id = await run('docker', ['ps', '-q', '-f', `name=${info.container_name}`]).catch(() => '');
